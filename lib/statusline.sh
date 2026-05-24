@@ -11,9 +11,13 @@ import sys, json
 d = json.load(sys.stdin)
 cwd = (d.get('workspace') or {}).get('current_dir') or d.get('cwd') or ''
 cw = d.get('context_window') or {}
-ctx_left = cw.get('remaining_percentage')
-if ctx_left is None:
-    ctx_left = (d.get('context') or {}).get('percent_remaining')
+ctx_used = cw.get('used_percentage')
+if ctx_used is None:
+    rem = cw.get('remaining_percentage')
+    if rem is None:
+        rem = (d.get('context') or {}).get('percent_remaining')
+    if rem is not None:
+        ctx_used = 100 - rem
 cost = d.get('cost') or {}
 rl = d.get('rate_limits') or {}
 def fmt(v, kind='int'):
@@ -21,18 +25,22 @@ def fmt(v, kind='int'):
     if kind == 'money': return f'{v:.2f}'
     return str(int(v))
 print(cwd)
-print(fmt(ctx_left))
+print(fmt(ctx_used))
 print(fmt(cost.get('total_cost_usd'), 'money'))
 print(fmt(cost.get('total_duration_ms')))
 print(fmt((rl.get('five_hour') or {}).get('used_percentage')))
 print(fmt((rl.get('seven_day') or {}).get('used_percentage')))
+print(fmt(cost.get('total_lines_added')))
+print(fmt(cost.get('total_lines_removed')))
 ")
-cwd=$(echo "$parsed"      | sed -n '1p')
-ctx_left=$(echo "$parsed" | sed -n '2p')
-cost_usd=$(echo "$parsed" | sed -n '3p')
-dur_ms=$(echo "$parsed"   | sed -n '4p')
-limit_5h=$(echo "$parsed" | sed -n '5p')
-limit_7d=$(echo "$parsed" | sed -n '6p')
+cwd=$(echo "$parsed"           | sed -n '1p')
+ctx_used=$(echo "$parsed"      | sed -n '2p')
+cost_usd=$(echo "$parsed"      | sed -n '3p')
+dur_ms=$(echo "$parsed"        | sed -n '4p')
+limit_5h=$(echo "$parsed"      | sed -n '5p')
+limit_7d=$(echo "$parsed"      | sed -n '6p')
+lines_added=$(echo "$parsed"   | sed -n '7p')
+lines_removed=$(echo "$parsed" | sed -n '8p')
 
 # --- dir ---
 short_cwd="${cwd/#$HOME/~}"
@@ -68,12 +76,12 @@ if [ -n "$dur_ms" ] && [ "$dur_ms" -gt 0 ] 2>/dev/null; then
   dur_str="  \033[90m${dur_fmt}\033[0m"
 fi
 
-# --- context % (remaining; red <15, yellow <30, else gray) ---
+# --- context % used (high = bad, mirrors limits' semantics) ---
 ctx_str=""
-if [ -n "$ctx_left" ]; then
-  if   [ "$ctx_left" -lt 15 ] 2>/dev/null; then ctx_str="  \033[31mcontext ${ctx_left}%\033[0m"
-  elif [ "$ctx_left" -lt 30 ] 2>/dev/null; then ctx_str="  \033[33mcontext ${ctx_left}%\033[0m"
-  else                                           ctx_str="  \033[90mcontext ${ctx_left}%\033[0m"
+if [ -n "$ctx_used" ]; then
+  if   [ "$ctx_used" -ge 85 ] 2>/dev/null; then ctx_str="  \033[31mcontext ${ctx_used}%\033[0m"
+  elif [ "$ctx_used" -ge 70 ] 2>/dev/null; then ctx_str="  \033[33mcontext ${ctx_used}%\033[0m"
+  else                                           ctx_str="  \033[90mcontext ${ctx_used}%\033[0m"
   fi
 fi
 
@@ -90,7 +98,13 @@ if [ -n "$limit_5h" ] || [ -n "$limit_7d" ]; then
   limits_str="  ${lcolor}limits ${limit_5h:-?}%/${limit_7d:-?}%\033[0m"
 fi
 
-# --- vercel deployment dot (optional; read-only from cache) ---
+# --- session diff (+N added green / -N removed red); hidden when both are zero ---
+diff_str=""
+if [ -n "$lines_added" ] && [ -n "$lines_removed" ] && { [ "$lines_added" -gt 0 ] 2>/dev/null || [ "$lines_removed" -gt 0 ] 2>/dev/null; }; then
+  diff_str="  \033[32m+${lines_added}\033[0m \033[31m-${lines_removed}\033[0m"
+fi
+
+# --- vercel deployment triangle (optional; read-only from cache) ---
 vercel_str=""
 project_id=""
 if [ -f "$cwd/.vercel/project.json" ]; then
@@ -123,10 +137,24 @@ if [ -n "$branch" ] && [ -n "$project_id" ]; then
         ERROR|CANCELED)                 color="\033[31m" ;;
         *)                              color="\033[90m" ;;
       esac
-      vercel_str="  ${color}●\033[0m \033[90m${v_url}\033[0m"
+      vercel_str="  ${color}▲\033[0m \033[90m${v_url}\033[0m"
     fi
   fi
 fi
 
-printf "\033[36m%s\033[0m%b%b%b%b%b%b" \
-  "$dir_name" "$git_str" "$ctx_str" "$limits_str" "$cost_str" "$dur_str" "$vercel_str"
+# Group segments into visual clusters; insert a separator only between
+# non-empty clusters so a missing field never leaves a dangling dot.
+# Strip one leading space from each cluster so the dot is symmetric (1sp · 1sp).
+sep=" \033[90m·\033[0m"
+identity="\033[36m/${dir_name}\033[0m${git_str}"
+capacity="${ctx_str}${limits_str}"
+metrics="${cost_str}${dur_str}"
+diff="${diff_str}"
+deploy="${vercel_str}"
+
+out="$identity"
+[ -n "$capacity" ] && out="${out}${sep}${capacity# }"
+[ -n "$metrics" ]  && out="${out}${sep}${metrics# }"
+[ -n "$diff" ]     && out="${out}${sep}${diff# }"
+[ -n "$deploy" ]   && out="${out}${sep}${deploy# }"
+printf "%b" "$out"
