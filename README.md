@@ -1,19 +1,21 @@
 # claude-statusline
 
-A custom statusline for [Claude Code](https://claude.com/claude-code) with rate-limit usage, session cost, context window, and an optional live Vercel deployment dot.
+A custom statusline for [Claude Code](https://claude.com/claude-code): rate-limit usage, context window, session cost & duration, lines added/removed, and an optional live Vercel deployment indicator. Visual clusters separated by dim dots.
 
 ```
-my-project  feature-branch*  context 72%  limits 38%/12%  $0.85  12m  ●  my-project.vercel.app
+/my-project  feature-branch* · context 28%  limits 38%/12% · $0.85  12m · +127 -34 · ▲ my-project.vercel.app
 ```
 
 ## Features
 
-- **Branch + dirty marker** — green when clean, yellow with `*` when there are uncommitted changes
-- **Context window %** — turns yellow under 30%, red under 15%
+- **Path + branch** — cyan `/dir` and green branch name; branch turns yellow with a `*` when there are uncommitted changes
+- **Context window %** — % used (number rises as context fills). Turns yellow at ≥70%, red at ≥85%
 - **Plan rate limits** — `limits 5h%/7d%` from Claude Code's gateway, color-coded by the higher of the two (gray <50%, yellow <80%, red ≥80%)
 - **Session cost** — theoretical API price for the current session
 - **Session duration** — wall-clock time the assistant has been working
-- **Vercel deployment dot** *(optional)* — colored dot reflecting the latest deployment for the current branch: yellow=BUILDING, green=READY, red=ERROR. Updated in near-real-time via webhook → ntfy.sh → local subscriber, with bounded polling to fill the gap left by `deployment.ready` requiring an integration.
+- **Session diff** — `+N -N` lines added (green) / removed (red); auto-hides on a fresh session
+- **Cluster separators** — dim `·` dots group segments into identity / capacity / metrics / diff / deployment; separators only appear between clusters that have content
+- **Vercel deployment triangle** *(optional)* — `▲` colored by the latest deployment state for the current branch: yellow=BUILDING, green=READY, red=ERROR. Updated in near-real-time via webhook → ntfy.sh → local subscriber, with bounded polling to fill the gap left by `deployment.ready` requiring an integration.
 
 ## Requirements
 
@@ -74,18 +76,19 @@ Open `~/.claude/statusline.sh` and edit. Common changes:
 
 | Change | Where |
 |---|---|
-| Color thresholds | `if [ "$ctx_left" -lt 15 ]` / `if [ "$hi" -ge 80 ]` |
-| Segment order | Last `printf` line — reorder the `$..._str` variables |
-| Drop a segment | Comment out its block + remove from the final `printf` |
-| Add a field | Extract from the JSON blob inside the top `python3 -c` block |
+| Color thresholds | `if [ "$ctx_used" -ge 85 ]` / `if [ "$hi" -ge 80 ]` (context uses ≥, lower = healthier) |
+| Cluster grouping | The bottom of the script: `identity`, `capacity`, `metrics`, `diff`, `deploy` variables — move a `$..._str` into a different cluster, or add/remove a cluster line |
+| Separator character | The `sep=` line near the bottom: change `·` to `│`, `▸`, `—`, etc. |
+| Drop a segment | Comment out its block; it falls out of its cluster automatically (empty clusters get no separator) |
+| Add a field | Extract from the JSON blob inside the top `python3 -c` block, add a new `${...}_str` segment, drop it into a cluster |
 
-The full JSON Claude Code pipes in includes more fields than we use: `session_id`, `session_name`, `model`, `effort`, `output_style`, `cost.total_lines_added`, `context_window.total_input_tokens`, etc. Dump a sample with:
+The full JSON Claude Code pipes in includes more fields than we use: `session_id`, `session_name`, `model`, `effort`, `output_style`, `cost.total_api_duration_ms`, `context_window.total_input_tokens`, etc. Dump a sample by adding this at the top of the script:
 
 ```bash
-echo "$INPUT" > /tmp/last-input.json
+echo "$input" > /tmp/last-input.json
 ```
 
-at the top of the script and inspect.
+then inspect with `python3 -m json.tool < /tmp/last-input.json`.
 
 ## Troubleshooting
 
