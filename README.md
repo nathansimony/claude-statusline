@@ -3,7 +3,7 @@
 A custom statusline for [Claude Code](https://claude.com/claude-code) with rate-limit usage, session cost, context window, and an optional live Vercel deployment dot.
 
 ```
-dropoff-finder-fr  main  context 85%  limits 42%/17%  $7.53  6h8m  ●  relais.net
+my-project  feature-branch*  context 72%  limits 38%/12%  $0.85  12m  ●  my-project.vercel.app
 ```
 
 ## Features
