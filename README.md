@@ -2,6 +2,10 @@
 
 A custom statusline for [Claude Code](https://claude.com/claude-code): rate-limit usage, context window, session cost & duration, lines added/removed, and an optional live Vercel deployment indicator. Visual clusters separated by dim dots.
 
+![statusline preview: four scenarios showing healthy, mid-pressure, heavy-load, and fresh-session states with color-coded segments](docs/preview.png)
+
+Plain-text rendering of one scenario:
+
 ```
 /my-project  feature-branch* · context 28%  limits 38%/12% · $0.85  12m · +127 -34 · ▲ my-project.vercel.app
 ```
