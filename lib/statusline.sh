@@ -18,6 +18,37 @@ if ctx_used is None:
         rem = (d.get('context') or {}).get('percent_remaining')
     if rem is not None:
         ctx_used = 100 - rem
+import os
+# --- theme resolution -------------------------------------------------------
+# Mirrors Claude Code's own resolver (kSe): an explicit setting wins, then
+# COLORFGBG, then dark. Reads the same 'theme' key the /config picker writes,
+# so changing theme there changes the statusline on the very next render.
+def resolve_theme(cwd):
+    theme = None
+    home = os.path.expanduser('~')
+    # Lowest precedence first; each later file overrides an earlier one.
+    for f in (os.path.join(home, '.claude', 'settings.json'),
+              os.path.join(home, '.claude', 'settings.local.json'),
+              os.path.join(cwd, '.claude', 'settings.json') if cwd else None,
+              os.path.join(cwd, '.claude', 'settings.local.json') if cwd else None):
+        if not f: continue
+        try:
+            v = (json.load(open(f)) or {}).get('theme')
+            if isinstance(v, str) and v: theme = v
+        except Exception: pass
+    if theme:
+        # Covers dark / light and their -daltonized and -ansi variants.
+        if theme.startswith('light'): return 'light'
+        if theme.startswith('dark'):  return 'dark'
+    # 'auto' or unset: fall back the way Claude Code does.
+    fgbg = os.environ.get('COLORFGBG')
+    if fgbg:
+        last = fgbg.split(';')[-1]
+        try:
+            n = int(last)
+            if 0 <= n <= 15: return 'dark' if (n <= 6 or n == 8) else 'light'
+        except ValueError: pass
+    return 'dark'
 cost = d.get('cost') or {}
 rl = d.get('rate_limits') or {}
 model = d.get('model') or {}
@@ -61,6 +92,7 @@ print(fmt(cost.get('total_lines_added')))
 print(fmt(cost.get('total_lines_removed')))
 print(model_name)
 print(effort or '')
+print(resolve_theme(cwd))
 print(fmt_size(cw.get('context_window_size')))
 print(fmt_tokens(ctx_tokens))
 ")
@@ -74,22 +106,33 @@ lines_added=$(echo "$parsed"   | sed -n '7p')
 lines_removed=$(echo "$parsed" | sed -n '8p')
 model_name=$(echo "$parsed"    | sed -n '9p')
 effort=$(echo "$parsed"        | sed -n '10p')
-ctx_size=$(echo "$parsed"      | sed -n '11p')
-ctx_tokens=$(echo "$parsed"    | sed -n '12p')
+theme=$(echo "$parsed"         | sed -n '11p')
+ctx_size=$(echo "$parsed"      | sed -n '12p')
+ctx_tokens=$(echo "$parsed"    | sed -n '13p')
 
 # --- palette ---------------------------------------------------------------
-# Claude Code's own dark-theme tokens, lifted from the CLI's internal theme
-# table so the statusline paints itself the same colors the TUI above it does.
-# Truecolor (24-bit) and hardcoded on purpose: these no longer follow your
-# terminal theme, which is the point — they follow Claude Code's instead.
-# For the light theme, swap in the values commented at the right.
-c_claude="\033[38;2;215;119;87m"    # claude    #D77757  (light: 215,119,87)
-c_success="\033[38;2;78;186;101m"   # success   #4EBA65  (light:  44,122,57)
-c_error="\033[38;2;255;107;128m"    # error     #FF6B80  (light: 171, 43,63)
-c_warning="\033[38;2;255;193;7m"    # warning   #FFC107  (light: 150,108,30)
-c_inactive="\033[38;2;153;153;153m" # inactive  #999999  (light: 102,102,102)
-c_border="\033[38;2;136;136;136m"   # promptBorder #888888  (light: 153,153,153)
-c_plan="\033[38;2;72;150;140m"      # planMode  #48968C  (light:   0,102,102)
+# Claude Code's own theme tokens, both tables, picked by the theme resolved
+# above. Switching theme in /config switches these on the next render — no
+# restart, because this script is re-executed every time.
+# Truecolor (24-bit); the values are the CLI's, so the statusline paints itself
+# the same colors as the interface above it.
+if [ "$theme" = "light" ]; then
+  c_claude="\033[38;2;215;119;87m"   # claude       #D77757  (identical in both tables)
+  c_success="\033[38;2;44;122;57m"   # success      #2C7A39
+  c_error="\033[38;2;171;43;63m"     # error        #AB2B3F
+  c_warning="\033[38;2;150;108;30m"  # warning      #966C1E
+  c_inactive="\033[38;2;102;102;102m" # inactive    #666666
+  c_border="\033[38;2;153;153;153m"  # promptBorder #999999
+  c_plan="\033[38;2;0;102;102m"      # planMode     #006666
+else
+  c_claude="\033[38;2;215;119;87m"   # claude       #D77757
+  c_success="\033[38;2;78;186;101m"  # success      #4EBA65
+  c_error="\033[38;2;255;107;128m"   # error        #FF6B80
+  c_warning="\033[38;2;255;193;7m"   # warning      #FFC107
+  c_inactive="\033[38;2;153;153;153m" # inactive    #999999
+  c_border="\033[38;2;136;136;136m"  # promptBorder #888888
+  c_plan="\033[38;2;72;150;140m"     # planMode     #48968C
+fi
 c_off="\033[0m"
 
 # --- dir ---

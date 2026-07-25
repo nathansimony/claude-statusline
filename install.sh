@@ -39,6 +39,76 @@ s["statusLine"] = {"type": "command", "command": "$CLAUDE_DIR/statusline.sh"}
 p.write_text(json.dumps(s, indent=2) + "\n")
 EOF
 
+# --- theme: reconcile an "auto" setting with the actual terminal --------------
+# The statusline reads the `theme` key to pick its palette. Claude Code resolves
+# `auto` by querying the terminal over OSC 11 and holding the answer in memory,
+# where the statusline cannot reach it — so under `auto` the statusline falls
+# back to dark, and a light terminal ends up with a dark statusline.
+#
+# The installer runs in a plain interactive shell with no TUI holding the tty,
+# so it is the one place the query is safe. We use it to offer an explicit theme
+# rather than to cache a value: settings.json stays the single source of truth,
+# so nothing can go stale or disagree later.
+
+CURRENT_THEME=$(python3 -c "
+import json
+try: print((json.load(open('$SETTINGS')) or {}).get('theme') or 'auto')
+except Exception: print('auto')
+" 2>/dev/null)
+
+if [ "$CURRENT_THEME" = "auto" ] && [ -t 0 ] && [ -t 1 ]; then
+  DETECTED=$(python3 - <<'PY' 2>/dev/null
+import os, re, select, termios, tty
+try:
+    fd = os.open('/dev/tty', os.O_RDWR | os.O_NOCTTY)
+except OSError:
+    raise SystemExit
+saved = None
+try:
+    if not os.isatty(fd): raise SystemExit
+    saved = termios.tcgetattr(fd); tty.setraw(fd)
+    os.write(fd, b'\033]11;?\033\\')
+    buf = b''
+    while len(buf) < 64:
+        if not select.select([fd], [], [], 0.25)[0]: break
+        c = os.read(fd, 32)
+        if not c: break
+        buf += c
+        if b'\007' in buf or b'\033\\' in buf[2:]: break
+    m = re.search(r'rgba?:([0-9a-fA-F]{1,4})/([0-9a-fA-F]{1,4})/([0-9a-fA-F]{1,4})',
+                  buf.decode('ascii', 'ignore'))
+    if m:
+        r, g, b = (int(h, 16) / (16 ** len(h) - 1) for h in m.groups())
+        # Same relative-luminance test Claude Code applies to the OSC 11 reply.
+        print('light' if (0.2126*r + 0.7152*g + 0.0722*b) > 0.5 else 'dark')
+finally:
+    if saved is not None:
+        try: termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+        except Exception: pass
+    os.close(fd)
+PY
+)
+  # Only speak up when the fallback would actually be wrong.
+  if [ "$DETECTED" = "light" ]; then
+    echo
+    echo "Your Claude Code theme is 'auto' and this terminal has a light background."
+    echo "The statusline cannot see how Claude Code resolved 'auto', so it defaults to"
+    echo "dark — which would put dark colours on your light terminal."
+    read -r -p "Set theme to \"light\" in settings.json to keep them in step? [y/N] " tyn
+    if [[ "$tyn" =~ ^[Yy]$ ]]; then
+      python3 - <<EOF
+import json, pathlib
+p = pathlib.Path("$SETTINGS")
+s = json.loads(p.read_text()); s["theme"] = "light"
+p.write_text(json.dumps(s, indent=2) + "\n")
+EOF
+      echo "→ theme set to \"light\". Change it any time with /theme."
+    else
+      echo "→ Left as 'auto'. Pick \"Light mode\" in /theme if the colours look off."
+    fi
+  fi
+fi
+
 # --- optional: Vercel deployment dot -----------------------------------------
 
 echo
