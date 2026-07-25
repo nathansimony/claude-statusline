@@ -1,24 +1,25 @@
 # claude-statusline
 
-A custom statusline for [Claude Code](https://claude.com/claude-code): rate-limit usage, context window, session cost & duration, lines added/removed, and an optional live Vercel deployment indicator. Visual clusters separated by dim dots.
+A custom statusline for [Claude Code](https://claude.com/claude-code): active model, context size & effort level, rate-limit usage, context window, session cost & duration, lines added/removed, and an optional live Vercel deployment indicator. Visual clusters separated by dim dots.
 
 ![statusline preview: four scenarios showing healthy, mid-pressure, heavy-load, and fresh-session states with color-coded segments](docs/preview.png)
 
 Plain-text rendering of one scenario:
 
 ```
-/my-project  feature-branch* · context 28%  limits 38%/12% · $0.85  12m · +127 -34 · ▲ my-project.vercel.app
+/my-project  feature-branch* · Opus 5 (1M) ●●●○○ · context 28%  limits 38%/12% · $0.85  12m · +127 -34 · ▲ my-project.vercel.app
 ```
 
 ## Features
 
 - **Path + branch** — cyan `/dir` and green branch name; branch turns yellow with a `*` when there are uncommitted changes
+- **Model, context size, effort** — `Opus 5 (1M) ●`: the model actually driving the session, its context window size, and its current effort level, in flat orange. Effort is a 5-slot dot meter — `●○○○○` low, `●●○○○` medium, `●●●○○` high, `●●●●○` xhigh, `●●●●●` max. It uses only `●` and `○`, both East Asian Width `A` and both from the same circle family, so every level is the same width and sits on the same optical center; single-glyph ramps can't hold that, since the glyphs that would fill out a 5-step scale (`◐◉◈`, or the quadrant fills `◔◕`) differ in width class and vertical placement. It tracks `/effort` live rather than the persisted default, and drops off on models that don't support effort (Haiku 4.5, Sonnet 4.5, Opus 4.1 and older); the size drops off if the payload omits it. Note that ultracode sessions report as `◉` xhigh — Claude Code normalizes ultracode to xhigh before the statusline sees it, so the two are indistinguishable
 - **Context window %** — % used (number rises as context fills). Turns yellow at ≥70%, red at ≥85%
 - **Plan rate limits** — `limits 5h%/7d%` from Claude Code's gateway, color-coded by the higher of the two (gray <50%, yellow <80%, red ≥80%)
 - **Session cost** — theoretical API price for the current session
 - **Session duration** — wall-clock time the assistant has been working
 - **Session diff** — `+N -N` lines added (green) / removed (red); auto-hides on a fresh session
-- **Cluster separators** — dim `·` dots group segments into identity / capacity / metrics / diff / deployment; separators only appear between clusters that have content
+- **Cluster separators** — dim `·` dots group segments into identity / engine / capacity / metrics / diff / deployment; separators only appear between clusters that have content
 - **Vercel deployment triangle** *(optional)* — `▲` colored by the latest deployment state for the current branch: yellow=BUILDING, green=READY, red=ERROR. Updated in near-real-time via webhook → ntfy.sh → local subscriber, with bounded polling to fill the gap left by `deployment.ready` requiring an integration.
 
 ## Requirements

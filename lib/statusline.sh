@@ -7,7 +7,7 @@
 input=$(cat)
 
 parsed=$(echo "$input" | python3 -c "
-import sys, json
+import sys, json, re
 d = json.load(sys.stdin)
 cwd = (d.get('workspace') or {}).get('current_dir') or d.get('cwd') or ''
 cw = d.get('context_window') or {}
@@ -20,6 +20,19 @@ if ctx_used is None:
         ctx_used = 100 - rem
 cost = d.get('cost') or {}
 rl = d.get('rate_limits') or {}
+model = d.get('model') or {}
+# 'effort' is omitted entirely by Claude Code for models that don't support it.
+effort = (d.get('effort') or {}).get('level')
+# Claude Code already suffixes display_name with '(1M context)' on 1M sessions;
+# strip it so the size we render below isn't printed twice.
+model_name = re.sub(r'\s*\(1M(?: context)?\)\s*$', '', model.get('display_name') or '')
+def fmt_size(n):
+    if not n: return ''
+    for div, unit in ((1000000, 'M'), (1000, 'k')):
+        if n >= div:
+            v = n / div
+            return f'{v:.0f}{unit}' if v == int(v) else f'{v:.1f}{unit}'
+    return str(int(n))
 def fmt(v, kind='int'):
     if v is None: return ''
     if kind == 'money': return f'{v:.2f}'
@@ -32,6 +45,9 @@ print(fmt((rl.get('five_hour') or {}).get('used_percentage')))
 print(fmt((rl.get('seven_day') or {}).get('used_percentage')))
 print(fmt(cost.get('total_lines_added')))
 print(fmt(cost.get('total_lines_removed')))
+print(model_name)
+print(effort or '')
+print(fmt_size(cw.get('context_window_size')))
 ")
 cwd=$(echo "$parsed"           | sed -n '1p')
 ctx_used=$(echo "$parsed"      | sed -n '2p')
@@ -41,6 +57,9 @@ limit_5h=$(echo "$parsed"      | sed -n '5p')
 limit_7d=$(echo "$parsed"      | sed -n '6p')
 lines_added=$(echo "$parsed"   | sed -n '7p')
 lines_removed=$(echo "$parsed" | sed -n '8p')
+model_name=$(echo "$parsed"    | sed -n '9p')
+effort=$(echo "$parsed"        | sed -n '10p')
+ctx_size=$(echo "$parsed"      | sed -n '11p')
 
 # --- dir ---
 short_cwd="${cwd/#$HOME/~}"
@@ -59,6 +78,32 @@ if [ -n "$cwd" ] && git -C "$cwd" rev-parse --is-inside-work-tree >/dev/null 2>&
       git_str="  \033[32m${branch}\033[0m"
     fi
   fi
+fi
+
+# --- engine: model, context size, effort — e.g. "Opus 5 (1M) ●" ---
+# One flat orange for the whole cluster: this is session identity, not a state
+# to react to, so it deliberately stays out of the gray/yellow/red grammar.
+# Effort renders as a 5-slot dot meter: ●○○○○ low … ●●●●● max.
+# Only two glyphs, ● U+25CF and ○ U+25CB, both East Asian Width 'A' and both from
+# the same circle family — so every level is the same 5 columns wide and sits on
+# the same optical center. Mixed-family ramps (◐◉◈, or the quadrant fills ◔◕)
+# can't hold that: those glyphs differ in width class and vertical placement.
+# Unknown levels fall back to the bare word so a new level is never swallowed.
+# Both the size and the meter drop out when absent from the payload.
+engine_str=""
+if [ -n "$model_name" ]; then
+  engine_str="  \033[38;5;208m${model_name}"
+  [ -n "$ctx_size" ] && engine_str="${engine_str} (${ctx_size})"
+  case "$effort" in
+    low)    engine_str="${engine_str} ●○○○○" ;;
+    medium) engine_str="${engine_str} ●●○○○" ;;
+    high)   engine_str="${engine_str} ●●●○○" ;;
+    xhigh)  engine_str="${engine_str} ●●●●○" ;;
+    max)    engine_str="${engine_str} ●●●●●" ;;
+    "")     ;;
+    *)      engine_str="${engine_str} ${effort}" ;;
+  esac
+  engine_str="${engine_str}\033[0m"
 fi
 
 # --- cost ---
@@ -147,12 +192,14 @@ fi
 # Strip one leading space from each cluster so the dot is symmetric (1sp · 1sp).
 sep=" \033[90m·\033[0m"
 identity="\033[36m/${dir_name}\033[0m${git_str}"
+engine="${engine_str}"
 capacity="${ctx_str}${limits_str}"
 metrics="${cost_str}${dur_str}"
 diff="${diff_str}"
 deploy="${vercel_str}"
 
 out="$identity"
+[ -n "$engine" ]   && out="${out}${sep}${engine# }"
 [ -n "$capacity" ] && out="${out}${sep}${capacity# }"
 [ -n "$metrics" ]  && out="${out}${sep}${metrics# }"
 [ -n "$diff" ]     && out="${out}${sep}${diff# }"
