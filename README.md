@@ -70,6 +70,18 @@ So on `auto` it falls back exactly as Claude Code does when nothing answers — 
 
 **Fix:** pick "Light mode" in `/theme`. `install.sh` also catches this, since it runs before any TUI holds the tty and can therefore ask the terminal safely: finding `auto` plus a light background, it offers to set the theme for you. It stores nothing of its own — a cached background would go stale the moment you switched terminal profile, and would describe the terminal you installed from rather than the one you work in.
 
+## Updating
+
+```bash
+cd claude-statusline
+git pull
+./install.sh
+```
+
+Re-running the installer is the update path. It refreshes the render script — which takes effect on the next render, with nothing to restart — and, if you have the Vercel dot, refreshes the subscriber and reloads its launchd job.
+
+It will not ask you to set the Vercel dot up again, and it never touches an existing webhook or ntfy topic: creating a second webhook would leave the first one posting to a topic nothing listens to. To move to a fresh topic or webhook, run `./uninstall.sh` first and install again.
+
 ## Uninstall
 
 From the cloned repo:
