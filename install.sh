@@ -110,9 +110,32 @@ EOF
 fi
 
 # --- optional: Vercel deployment dot -----------------------------------------
+# Re-running the installer is the update path, so an existing setup must not be
+# asked the setup question again: answering yes would mint a second ntfy topic
+# and create a second webhook, leaving the first one posting where nothing
+# listens. When the topic file is present we refresh the moving parts — the
+# subscriber script and the launchd job — and leave the webhook alone.
 
-echo
-read -r -p "Set up the Vercel deployment dot? Needs the vercel CLI + an account. [y/N] " yn
+PLIST_PATH="$LAUNCH_AGENTS/com.${USER}.claude-statusline.vercel-subscriber.plist"
+
+if [ -f "$CLAUDE_DIR/vercel-webhook-topic" ]; then
+  echo
+  echo "→ Vercel dot already configured — refreshing subscriber, keeping your webhook"
+  install -m 0755 "$REPO_DIR/lib/vercel-subscriber.sh" "$CLAUDE_DIR/vercel-subscriber.sh"
+  sed -e "s|__HOME__|$HOME|g" -e "s|__USER__|$USER|g" \
+    "$REPO_DIR/templates/launchd.plist.tmpl" > "$PLIST_PATH"
+  # Reload so the daemon picks up the refreshed script.
+  launchctl unload "$PLIST_PATH" 2>/dev/null || true
+  launchctl load "$PLIST_PATH" 2>/dev/null \
+    && echo "→ Subscriber daemon reloaded." \
+    || echo "  Could not reload the daemon. Load it by hand: launchctl load $PLIST_PATH"
+  echo "  To move to a new topic or webhook, run ./uninstall.sh first."
+  yn="n"
+else
+  echo
+  read -r -p "Set up the Vercel deployment dot? Needs the vercel CLI + an account. [y/N] " yn
+fi
+
 if [[ "$yn" =~ ^[Yy]$ ]]; then
   if ! command -v vercel >/dev/null; then
     echo "  vercel CLI not found. Install with: npm i -g vercel"
@@ -147,7 +170,6 @@ if [[ "$yn" =~ ^[Yy]$ ]]; then
   echo "→ Installing subscriber to $CLAUDE_DIR/vercel-subscriber.sh"
   install -m 0755 "$REPO_DIR/lib/vercel-subscriber.sh" "$CLAUDE_DIR/vercel-subscriber.sh"
 
-  PLIST_PATH="$LAUNCH_AGENTS/com.${USER}.claude-statusline.vercel-subscriber.plist"
   echo "→ Generating launchd plist at $PLIST_PATH"
   sed -e "s|__HOME__|$HOME|g" -e "s|__USER__|$USER|g" \
     "$REPO_DIR/templates/launchd.plist.tmpl" > "$PLIST_PATH"
